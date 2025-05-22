@@ -9,7 +9,7 @@ import warnings
 
 
 class PIWebAPI:
-    def __init__(self, base_url: str = "https://egpna-pi-web.enelint.global/piwebapi", auth: str = "Kerberos", verify: bool =True, username: str =None, password: str =None):
+    def __init__(self, base_url: str, auth: str = "Kerberos", verify: bool =True, username: str =None, password: str =None):
         self.base_url = base_url
         self.username = username
         self.password = password
@@ -40,6 +40,7 @@ class PIWebAPI:
         url = f"{self.base_url}/dataservers"
         self.logger.info(f"{url}")
         response = self.session.get(url)
+        self.logger.info(f"URL: {response.url}")
         if response.status_code == 200:
             data_servers = response.json()["Items"]
             match = next((server for server in data_servers if server["Name"] == data_server_name), None)
@@ -119,7 +120,6 @@ class PIWebAPI:
         data = pd.DataFrame()
         for item in webids:
             url = f"{self.base_url}/streams/{item['webid']}/recorded"
-            self.logger.info(f"Fetching data for tag '{item['tag']}' from {url}")
             params = {
                 "startTime": starttime,
                 "endTime": endtime,
@@ -127,6 +127,7 @@ class PIWebAPI:
                 #selectedFields: selectedFields
             }
             response = self.session.get(url, params=params)
+            self.logger.info(f"Fetching data for tag '{item['tag']}' from {response.url}")
             if response.status_code == 409:
                 self.logger.error(f"Conflict error for tag '{item['tag']}': {response.status_code} - {response.text}")
                 continue
@@ -137,7 +138,7 @@ class PIWebAPI:
                 data_response = response.json()
                 if data_response["Items"]:
                     df = pd.DataFrame(data_response["Items"])
-                    df= df.insert(loc=0, column ='Tag', value = item['tag'])
+                    df.insert(loc=0, column ='Tag', value = item['tag'])
                     #df["Timestamp"] = pd.to_datetime(df["Timestamp"])
                     # What if there is an error in the value and it is not a number?
                     df["Value"] = pd.to_numeric(df["Value"], errors='coerce')
