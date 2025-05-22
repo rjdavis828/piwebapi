@@ -5,3 +5,4 @@ test*
 *.log
 *.config
 .env
+*.csv
