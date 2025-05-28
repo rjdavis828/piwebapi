@@ -89,11 +89,155 @@ class PIAssetServerClient:
     
     def webids(self, object_list):
         """
-        Retrieve webids for the specified tags from the given asset database.
-        :param object_list: A list of elements or attributes to return webids for.
+        Retrieve webids for the specified elements or attributes from the asset database.
+        :param object_list: A list of element/attribute names or paths to return webids for.
         :return: A list of dictionaries containing object names and their corresponding webids.
         """
+        if not object_list:
+            self.logger.error("No objects provided")
+            return None
+        
+        if len(object_list) == 0:
+            self.logger.error("Empty object list provided")
+            return None
+        
+        webids = []
+        
+        for obj_name in object_list:
+            # Try to find as element first
+            element_webid = self._find_element_webid(obj_name)
+            if element_webid:
+                webids.append({'name': obj_name, 'webid': element_webid, 'type': 'element'})
+                continue
+                
+            # If not found as element, try to find as attribute
+            attribute_webid = self._find_attribute_webid(obj_name)
+            if attribute_webid:
+                webids.append({'name': obj_name, 'webid': attribute_webid, 'type': 'attribute'})
+                continue
+                
+            self.logger.error(f"Object '{obj_name}' not found in asset database.")
+        
+        if not webids:
+            self.logger.error("No valid objects found in asset database.")
+            return None
+            
+        return webids
 
+    def _find_element_webid(self, element_name):
+        """
+        Find an element's WebID by name within the asset database.
+        :param element_name: The name of the element to search for.
+        :return: The WebID of the element if found, None otherwise.
+        """
+        # Search for elements in the asset database
+        url = f"{self.base_url}/assetdatabases/{self.AssetDBID}/elements"
+        params = {"nameFilter": element_name}
+        
+        response = self.session.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data["Items"]:
+                # Return the first match
+                element = data["Items"][0]
+                self.logger.info(f"Element '{element_name}' found with WebID: {element['WebId']}")
+                return element["WebId"]
+            else:
+                self.logger.debug(f"Element '{element_name}' not found.")
+        else:
+            self.logger.error(f"Failed to search for element '{element_name}': {response.status_code} - {response.text}")
+        
+        return None
+    
+    def _find_attribute_webid(self, attribute_path):
+        """
+        Find an attribute's WebID by path (format: ElementName|AttributeName).
+        :param attribute_path: The path to the attribute (ElementName|AttributeName).
+        :return: The WebID of the attribute if found, None otherwise.
+        """
+        # Check if it's a path format (Element|Attribute)
+        if '|' in attribute_path:
+            element_name, attribute_name = attribute_path.split('|', 1)
+        else:
+            # If no pipe, assume it's just an attribute name and search broadly
+            return self._search_attributes_broadly(attribute_path)
+        
+        # First find the element
+        element_webid = self._find_element_webid(element_name)
+        if not element_webid:
+            return None
+        
+        # Then search for the attribute within that element
+        url = f"{self.base_url}/elements/{element_webid}/attributes"
+        params = {"nameFilter": attribute_name}
+        
+        response = self.session.get(url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            if data["Items"]:
+                attribute = data["Items"][0]
+                self.logger.info(f"Attribute '{attribute_path}' found with WebID: {attribute['WebId']}")
+                return attribute["WebId"]
+            else:
+                self.logger.debug(f"Attribute '{attribute_name}' not found in element '{element_name}'.")
+        else:
+            self.logger.error(f"Failed to search for attribute '{attribute_path}': {response.status_code} - {response.text}")
+        
+        return None
+    
+    def _search_attributes_broadly(self, attribute_name):
+        """
+        Search for an attribute across all elements in the database.
+        :param attribute_name: The name of the attribute to search for.
+        :return: The WebID of the first matching attribute found, None otherwise.
+        """
+        # This is a broader search that may be slower for large databases
+        url = f"{self.base_url}/assetdatabases/{self.AssetDBID}/elementtemplates"
+        
+        response = self.session.get(url)
+        if response.status_code == 200:
+            templates = response.json()["Items"]
+            
+            for template in templates:
+                # Search attributes in this template
+                attr_url = f"{self.base_url}/elementtemplates/{template['WebId']}/attributetemplates"
+                attr_params = {"nameFilter": attribute_name}
+                
+                attr_response = self.session.get(attr_url, params=attr_params)
+                if attr_response.status_code == 200:
+                    attr_data = attr_response.json()
+                    if attr_data["Items"]:
+                        # Found the attribute template, now find actual instances
+                        return self._find_attribute_instances(attribute_name)
+        
+        return None
+
+    def _find_attribute_instances(self, attribute_name):
+        """
+        Find actual attribute instances by name.
+        :param attribute_name: The name of the attribute.
+        :return: The WebID of the first matching attribute instance.
+        """
+        # Search elements and then their attributes
+        url = f"{self.base_url}/assetdatabases/{self.AssetDBID}/elements"
+        
+        response = self.session.get(url)
+        if response.status_code == 200:
+            elements = response.json()["Items"]
+            
+            for element in elements:
+                attr_url = f"{self.base_url}/elements/{element['WebId']}/attributes"
+                attr_params = {"nameFilter": attribute_name}
+                
+                attr_response = self.session.get(attr_url, params=attr_params)
+                if attr_response.status_code == 200:
+                    attr_data = attr_response.json()
+                    if attr_data["Items"]:
+                        attribute = attr_data["Items"][0]
+                        self.logger.info(f"Attribute '{attribute_name}' found with WebID: {attribute['WebId']}")
+                        return attribute["WebId"]
+        
+        return None
 
 class PIDataServerClient:
     def __init__(self, base_url: str, auth: str = "Kerberos", verify: bool =True, username: str =None, password: str =None):
